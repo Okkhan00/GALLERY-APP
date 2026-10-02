@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,6 +17,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,32 +26,44 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
+          cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --version
 
-      - name: Accept licenses and install SDK packages
+      - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Set up Gradle (with caching)
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
 
-      - name: Unit tests, lint, debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Build Debug APK
+        run: ./gradlew --no-daemon clean assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: vault-gallery-debug.apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: Upload lint report
+      - name: Run Unit Tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Run Lint
+        if: always()
+        run: ./gradlew --no-daemon lintDebug
+
+      - name: Upload Lint Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -58,37 +71,51 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
 
-      # Release build only runs when signing secrets exist (never committed to the repo).
-      - name: Decode release keystore
-        id: ks
+      # ---------------------------------------------------------
+      # RELEASE BUILD
+      # ---------------------------------------------------------
+
+      - name: Decode Release Keystore
+        id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
             echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No KEYSTORE_BASE64 secret: skipping signed release build."
+            echo "No KEYSTORE_BASE64 secret found."
+            echo "Signed release build will be skipped."
           fi
 
-      - name: Build signed release APK
-        if: steps.ks.outputs.present == 'true'
+      - name: Build Signed Release APK
+        if: steps.keystore.outputs.present == 'true'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle --no-daemon :app:assembleRelease
+        run: |
+          ./gradlew --no-daemon assembleRelease
 
-      - name: Upload release APK
-        if: steps.ks.outputs.present == 'true'
+      - name: Upload Release APK
+        if: steps.keystore.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: vault-gallery-release.apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
-      - name: Remove keystore
+      - name: Create GitHub Release
+        if: steps.keystore.outputs.present == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Vault Gallery v${{ github.run_number }}
+          generate_release_notes: true
+          files: app/build/outputs/apk/release/*.apk
+
+      - name: Remove Keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
