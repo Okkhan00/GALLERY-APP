@@ -27,27 +27,72 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Verify Android SDK
+      # GitHub-hosted runner already contains Android SDK.
+      # Add SDK tools explicitly to PATH.
+      - name: Configure Android SDK
+        shell: bash
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/*/bin/sdkmanager"
+          fi
+
+          echo "SDK Manager:"
+          ls -la "$ANDROID_HOME/cmdline-tools/" || true
+
+          SDKMANAGER_PATH=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)
+
+          if [ -z "$SDKMANAGER_PATH" ]; then
+            echo "ERROR: sdkmanager not found."
+            exit 1
+          fi
+
+          echo "Found sdkmanager at: $SDKMANAGER_PATH"
+
+          SDKMANAGER_DIR=$(dirname "$SDKMANAGER_PATH")
+
+          echo "$SDKMANAGER_DIR" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+          echo "SDKMANAGER_PATH=$SDKMANAGER_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          which sdkmanager || true
           sdkmanager --version
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
           yes | sdkmanager --licenses > /dev/null || true
+
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
+      # Project does not contain gradlew.
+      # Install Gradle directly.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Verify Gradle
+        run: |
+          gradle --version
 
       - name: Build Debug APK
-        run: ./gradlew --no-daemon clean assembleDebug
+        run: |
+          gradle --no-daemon clean assembleDebug
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -57,11 +102,13 @@ jobs:
           if-no-files-found: error
 
       - name: Run Unit Tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        run: |
+          gradle --no-daemon testDebugUnitTest
 
       - name: Run Lint
         if: always()
-        run: ./gradlew --no-daemon lintDebug
+        run: |
+          gradle --no-daemon lintDebug
 
       - name: Upload Lint Report
         if: always()
@@ -72,13 +119,14 @@ jobs:
           if-no-files-found: ignore
 
       # ---------------------------------------------------------
-      # RELEASE BUILD
+      # SIGNED RELEASE
       # ---------------------------------------------------------
 
       - name: Decode Release Keystore
         id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        shell: bash
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
@@ -87,7 +135,7 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "No KEYSTORE_BASE64 secret found."
-            echo "Signed release build will be skipped."
+            echo "Skipping signed release build."
           fi
 
       - name: Build Signed Release APK
@@ -97,7 +145,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew --no-daemon assembleRelease
+          gradle --no-daemon assembleRelease
 
       - name: Upload Release APK
         if: steps.keystore.outputs.present == 'true'
@@ -106,6 +154,10 @@ jobs:
           name: vault-gallery-release.apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      # ---------------------------------------------------------
+      # GITHUB RELEASE
+      # ---------------------------------------------------------
 
       - name: Create GitHub Release
         if: steps.keystore.outputs.present == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -118,4 +170,5 @@ jobs:
 
       - name: Remove Keystore
         if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
+        run: |
+          rm -f "$RUNNER_TEMP/release.jks"
