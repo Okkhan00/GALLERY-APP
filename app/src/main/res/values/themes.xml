@@ -1,0 +1,9 @@
+<resources>
+    <color name="vault_bg">#070A09</color>
+    <color name="ic_launcher_background">#0F5E44</color>
+    <style name="Theme.VaultGallery" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/vault_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
