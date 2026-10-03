@@ -10,6 +10,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import com.vaultgallery.app.data.AppDatabase
+import com.vaultgallery.app.data.MediaCounts
+import com.vaultgallery.app.data.SettingsKeys
+import com.vaultgallery.app.data.TypeBytes
 import com.vaultgallery.app.data.PhotoEntity
 import com.vaultgallery.app.data.PhotoTagCrossRef
 import com.vaultgallery.app.data.RecentPhotoEntity
@@ -55,15 +58,16 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     val selection = MutableStateFlow<Set<Long>>(emptySet())
     val scanProgress = MutableStateFlow<Pair<Int, Int>?>(null)
 
-    private data class Params(val q: String, val fav: Boolean, val tag: Long, val sort: Int)
+    private data class Params(val q: String, val fav: Boolean, val tag: Long, val sort: Int, val type: Int)
 
-    /** null = still loading. The same list feeds the grid and the viewer, so indices always match. */
+    /** null = still loading. The same list (photos AND videos) feeds the grid, photo viewer and video player, so indices always match. */
     val photos: StateFlow<List<PhotoEntity>?> = combine(
         query.debounce { if (it.isEmpty()) 0L else 200L },
         favoritesOnly, tagFilter,
-        settingsRepo.flow.map { it.sort }.distinctUntilChanged()
-    ) { q, f, t, s -> Params(q.trim(), f, t, s) }
-        .flatMapLatest { p -> db.photos().observe(p.q, if (p.fav) 1 else 0, p.tag, p.sort) }
+        settingsRepo.flow.map { it.sort }.distinctUntilChanged(),
+        settingsRepo.flow.map { it.mediaFilter }.distinctUntilChanged(),
+    ) { q, f, t, s, type -> Params(q.trim(), f, t, s, type) }
+        .flatMapLatest { p -> db.photos().observe(p.q, p.type, if (p.fav) 1 else 0, p.tag, p.sort) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val trash: StateFlow<List<PhotoEntity>> =
@@ -76,13 +80,19 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         walletRepo.wallet.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val totalBytes: StateFlow<Long> =
         db.photos().observeBytes().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    val counts: StateFlow<MediaCounts> =
+        db.photos().observeCounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MediaCounts(0, 0, 0))
+    val typeBytes: StateFlow<TypeBytes> =
+        db.photos().observeTypeBytes().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TypeBytes(0, 0))
 
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) { scanTrigger.tryEmit(Unit) }
     }
 
     init {
+        // Watch both collections so new recordings, downloads, WhatsApp videos and outside deletions are picked up.
         app.contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer)
+        app.contentResolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer)
         viewModelScope.launch { walletRepo.ensure() }
         viewModelScope.launch { scanTrigger.debounce(1_500).collect { runScan() } }
     }
@@ -146,6 +156,13 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun unlock(photoId: Long, currency: Currency): UnlockResult = walletRepo.unlock(photoId, currency)
 
     fun debugGrant() = viewModelScope.launch { walletRepo.debugGrant(100, 500) }
+
+    fun setMediaFilter(type: Int) { setSetting(SettingsKeys.MEDIA_FILTER, type) }
+
+    /** Saved playback position; written at most every few seconds by the player and on exit. */
+    fun savePosition(id: Long, positionMs: Long) {
+        viewModelScope.launch { db.photos().setPosition(id, positionMs.coerceAtLeast(0)) }
+    }
 
     fun touchRecent(id: Long) = viewModelScope.launch {
         db.recent().touch(RecentPhotoEntity(id, now()))
