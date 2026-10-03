@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,16 +39,22 @@ import coil.compose.AsyncImage
 import com.vaultgallery.app.data.PhotoEntity
 import com.vaultgallery.app.ui.theme.Emerald
 import com.vaultgallery.app.ui.theme.Gold
+import com.vaultgallery.app.util.formatDuration
+import com.vaultgallery.app.util.resolutionBadge
+import com.vaultgallery.app.util.displayHeight
+import com.vaultgallery.app.util.displayWidth
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PhotoCard(
     photo: PhotoEntity, selected: Boolean, selecting: Boolean, showName: Boolean,
     modifier: Modifier, onClick: () -> Unit, onLongClick: () -> Unit, onFavorite: () -> Unit,
+    showDuration: Boolean = true,
 ) {
     val shape = RoundedCornerShape(14.dp)
     val label = buildString {
-        append(if (photo.locked) "Locked photo" else photo.displayName)
+        append(if (photo.locked) (if (photo.isVideo) "Locked video" else "Locked photo") else photo.displayName)
+        if (photo.isVideo && !photo.locked) append(", video, ${formatDuration(photo.durationMs)}")
         if (photo.favorite) append(", favorite")
         if (selected) append(", selected")
     }
@@ -69,6 +76,9 @@ fun PhotoCard(
         } else {
             AsyncImage(model = photo.contentUri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
+
+        // Static thumbnail + play icon + duration badge. Videos never autoplay in the grid. Locked videos show nothing.
+        if (photo.isVideo && !photo.locked) VideoOverlay(photo, showDuration)
 
         if (showName && !photo.locked) {
             Text(
@@ -95,6 +105,43 @@ fun PhotoCard(
                     modifier = Modifier.size(22.dp).background(Color.Black.copy(alpha = .35f), CircleShape).padding(2.dp)
                 )
             }
+        }
+    }
+}
+
+/** Play glyph in the middle, duration (bottom-end) and an optional resolution tag (bottom-start). */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.VideoOverlay(photo: PhotoEntity, showDuration: Boolean) {
+    Icon(
+        Icons.Default.PlayArrow, null, tint = Color.White,
+        modifier = Modifier.align(Alignment.Center).size(40.dp).background(Color.Black.copy(alpha = .45f), CircleShape).padding(6.dp),
+    )
+    if (showDuration && photo.durationMs > 0) {
+        Text(
+            formatDuration(photo.durationMs), color = Color.White, style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                .background(Color.Black.copy(alpha = .6f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+    resolutionBadge(photo.displayWidth(), photo.displayHeight())?.let { badge ->
+        Text(
+            badge, color = Gold, style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.BottomStart).padding(6.dp)
+                .background(Color.Black.copy(alpha = .6f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/** Small thumbnail (trash, recent strip) with a play glyph for videos. Callers must not pass locked items. */
+@Composable
+fun MediaThumb(photo: PhotoEntity, modifier: Modifier) {
+    Box(modifier) {
+        AsyncImage(model = photo.contentUri, contentDescription = photo.displayName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (photo.isVideo) {
+            Icon(
+                Icons.Default.PlayArrow, null, tint = Color.White,
+                modifier = Modifier.align(Alignment.Center).size(26.dp).background(Color.Black.copy(alpha = .45f), CircleShape).padding(3.dp),
+            )
         }
     }
 }
