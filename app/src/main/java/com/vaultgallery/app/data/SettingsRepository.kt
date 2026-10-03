@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.map
 private val Context.settingsStore by preferencesDataStore("settings")
 
 /** theme: 0 system, 1 dark, 2 light. layout: 0 = 1 col, 1 = 2 col, 2 = 3 col, 3 = masonry.
- *  sort: 0 newest, 1 oldest, 2 name, 3 largest. Nothing secret lives here (PIN verifier is in PinManager). */
+ *  sort: 0 newest, 1 oldest, 2 name A-Z, 3 largest, 4 name Z-A, 5 longest (videos).
+ *  mediaFilter: -1 all, 0 photos, 1 videos (remembered between launches).
+ *  videoSpeedPct: default playback speed as a percentage (100 = 1.0x). Nothing secret lives here (PIN verifier is in PinManager). */
 data class AppSettings(
     val theme: Int = 0,
     val layout: Int = 1,
@@ -23,6 +25,12 @@ data class AppSettings(
     val autoLockSec: Int = 60,
     val secureScreens: Boolean = false,
     val showNames: Boolean = false,
+    val mediaFilter: Int = -1,
+    val videoAutoNext: Boolean = false,
+    val videoSpeedPct: Int = 100,
+    val videoRememberPosition: Boolean = true,
+    val videoKeepAwake: Boolean = true,
+    val videoShowDuration: Boolean = true,
 )
 
 object SettingsKeys {
@@ -35,6 +43,12 @@ object SettingsKeys {
     val AUTO_LOCK = intPreferencesKey("auto_lock_sec")
     val SECURE = booleanPreferencesKey("secure_screens")
     val SHOW_NAMES = booleanPreferencesKey("show_names")
+    val MEDIA_FILTER = intPreferencesKey("media_filter")
+    val VIDEO_AUTO_NEXT = booleanPreferencesKey("video_auto_next")
+    val VIDEO_SPEED = intPreferencesKey("video_speed_pct")
+    val VIDEO_REMEMBER_POS = booleanPreferencesKey("video_remember_pos")
+    val VIDEO_KEEP_AWAKE = booleanPreferencesKey("video_keep_awake")
+    val VIDEO_SHOW_DURATION = booleanPreferencesKey("video_show_duration")
 }
 
 class SettingsRepository(private val context: Context) {
@@ -50,6 +64,12 @@ class SettingsRepository(private val context: Context) {
             autoLockSec = p[SettingsKeys.AUTO_LOCK] ?: d.autoLockSec,
             secureScreens = p[SettingsKeys.SECURE] ?: d.secureScreens,
             showNames = p[SettingsKeys.SHOW_NAMES] ?: d.showNames,
+            mediaFilter = p[SettingsKeys.MEDIA_FILTER] ?: d.mediaFilter,
+            videoAutoNext = p[SettingsKeys.VIDEO_AUTO_NEXT] ?: d.videoAutoNext,
+            videoSpeedPct = p[SettingsKeys.VIDEO_SPEED] ?: d.videoSpeedPct,
+            videoRememberPosition = p[SettingsKeys.VIDEO_REMEMBER_POS] ?: d.videoRememberPosition,
+            videoKeepAwake = p[SettingsKeys.VIDEO_KEEP_AWAKE] ?: d.videoKeepAwake,
+            videoShowDuration = p[SettingsKeys.VIDEO_SHOW_DURATION] ?: d.videoShowDuration,
         )
     }
 
