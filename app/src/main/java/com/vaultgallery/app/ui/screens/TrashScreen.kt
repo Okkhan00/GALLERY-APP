@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -48,6 +50,7 @@ import coil.compose.AsyncImage
 import com.vaultgallery.app.GalleryViewModel
 import com.vaultgallery.app.security.AppLockManager
 import com.vaultgallery.app.ui.components.ConfirmDialog
+import com.vaultgallery.app.ui.components.MediaThumb
 import kotlinx.coroutines.launch
 
 /** App-level trash. "Delete forever" removes the real files, only after the system's own confirmation dialog. */
@@ -87,7 +90,12 @@ fun TrashScreen(vm: GalleryViewModel, onBack: () -> Unit) {
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp))
                     .border(if (sel) 2.dp else 0.dp, androidx.compose.material3.MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                     .clickable { selected = if (sel) selected - p.id else selected + p.id }) {
-                    AsyncImage(p.contentUri, p.displayName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    if (p.locked) {
+                        // Locked items are never decoded, in the trash either.
+                        Box(Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Lock, "Locked item", tint = com.vaultgallery.app.ui.theme.Gold)
+                        }
+                    } else MediaThumb(p, Modifier.fillMaxSize())
                     if (sel) Icon(Icons.Default.CheckCircle, "Selected", tint = androidx.compose.material3.MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
                 }
             }
@@ -95,7 +103,7 @@ fun TrashScreen(vm: GalleryViewModel, onBack: () -> Unit) {
     }
 
     if (confirm) ConfirmDialog(
-        "Delete forever?", "${targets.size} photo(s) will be permanently deleted from your device. This can't be undone. Android will ask you to confirm once more.", "Continue",
+        "Delete forever?", "${targets.size} item(s) will be permanently deleted from your device. This can't be undone. Android will ask you to confirm once more.", "Continue",
         onConfirm = {
             scope.launch {
                 val ids = targets
