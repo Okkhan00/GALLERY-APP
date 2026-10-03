@@ -32,19 +32,34 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.vaultgallery.app.security.AppLockManager
 
+// Granular media permissions on Android 13+, one legacy permission below. minSdk is 30, so 30-32 use READ_EXTERNAL_STORAGE.
 private fun requiredPermissions(): Array<String> = when {
-    Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-    Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+    Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
     else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
-private fun hasAccess(ctx: Context): Boolean {
-    fun granted(p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
-    return when {
-        Build.VERSION.SDK_INT >= 34 -> granted(Manifest.permission.READ_MEDIA_IMAGES) || granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-        Build.VERSION.SDK_INT >= 33 -> granted(Manifest.permission.READ_MEDIA_IMAGES)
-        else -> granted(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
+/** Permissions to request when only video access is missing (e.g. the user granted photos but denied videos). */
+fun videoPermissions(): Array<String> = when {
+    Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO)
+    else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+private fun granted(ctx: Context, p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
+
+// The gate opens if EITHER photos or videos are readable; each media type then degrades on its own.
+private fun hasAccess(ctx: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= 34 -> granted(ctx, Manifest.permission.READ_MEDIA_IMAGES) || granted(ctx, Manifest.permission.READ_MEDIA_VIDEO) ||
+        granted(ctx, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> granted(ctx, Manifest.permission.READ_MEDIA_IMAGES) || granted(ctx, Manifest.permission.READ_MEDIA_VIDEO)
+    else -> granted(ctx, Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
+fun hasVideoAccess(ctx: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= 34 -> granted(ctx, Manifest.permission.READ_MEDIA_VIDEO) || granted(ctx, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> granted(ctx, Manifest.permission.READ_MEDIA_VIDEO)
+    else -> granted(ctx, Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
 /** Explains why photo access is needed, never crashes on denial, and offers an Open-settings shortcut. */
@@ -60,12 +75,12 @@ fun PermissionGate(onGranted: () -> Unit, content: @Composable () -> Unit) {
         content()
     } else {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Allow access to your photos", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+            Text("Allow access to your photos and videos", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
             Text(
-                "Vault Gallery reads your photos on this device to show them in the gallery. Nothing is uploaded; the app has no internet permission.",
+                "Vault Gallery reads your photos and videos on this device to show them in the gallery. Nothing is uploaded; the app has no internet permission.",
                 textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 16.dp)
             )
-            Button(onClick = { AppLockManager.skipNextLock = true; launcher.launch(requiredPermissions()) }) { Text("Allow photo access") }
+            Button(onClick = { AppLockManager.skipNextLock = true; launcher.launch(requiredPermissions()) }) { Text("Allow media access") }
             OutlinedButton(
                 onClick = {
                     AppLockManager.skipNextLock = true
