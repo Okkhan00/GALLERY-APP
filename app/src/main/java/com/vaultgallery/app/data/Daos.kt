@@ -8,23 +8,28 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface PhotoDao {
-    // Search covers file name, caption and tag names; tag + favorites filters are optional.
+    // Search covers file name, caption, folder and tag names; media type, tag and favorites filters are optional.
+    // :type = -1 all, 0 photos, 1 videos. sort: 0 newest, 1 oldest, 2 name A-Z, 3 largest, 4 name Z-A, 5 longest.
     @Query(
         """
         SELECT * FROM photos p
         WHERE p.deleted = 0 AND p.missing = 0
+          AND (:type < 0 OR p.mediaType = :type)
           AND (:fav = 0 OR p.favorite = 1)
           AND (:tagId < 0 OR EXISTS (SELECT 1 FROM photo_tags x WHERE x.photoId = p.id AND x.tagId = :tagId))
           AND (:q = '' OR p.displayName LIKE '%' || :q || '%' OR p.caption LIKE '%' || :q || '%'
+               OR p.bucket LIKE '%' || :q || '%'
                OR EXISTS (SELECT 1 FROM photo_tags x JOIN tags t ON t.id = x.tagId
                           WHERE x.photoId = p.id AND t.name LIKE '%' || :q || '%'))
         ORDER BY CASE WHEN :sort = 1 THEN p.dateTaken END ASC,
                  CASE WHEN :sort = 2 THEN p.displayName END COLLATE NOCASE ASC,
                  CASE WHEN :sort = 3 THEN p.size END DESC,
+                 CASE WHEN :sort = 4 THEN p.displayName END COLLATE NOCASE DESC,
+                 CASE WHEN :sort = 5 THEN p.durationMs END DESC,
                  p.dateTaken DESC
         """
     )
-    fun observe(q: String, fav: Int, tagId: Long, sort: Int): Flow<List<PhotoEntity>>
+    fun observe(q: String, type: Int, fav: Int, tagId: Long, sort: Int): Flow<List<PhotoEntity>>
 
     @Query("SELECT * FROM photos WHERE deleted = 1 AND missing = 0 ORDER BY trashedAt DESC")
     fun observeTrash(): Flow<List<PhotoEntity>>
@@ -32,13 +37,33 @@ interface PhotoDao {
     @Query("SELECT COALESCE(SUM(size), 0) FROM photos WHERE deleted = 0 AND missing = 0")
     fun observeBytes(): Flow<Long>
 
+    // Counts always come from real rows, never hard-coded.
+    @Query(
+        """
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN mediaType = 0 THEN 1 ELSE 0 END), 0) AS photos,
+               COALESCE(SUM(CASE WHEN mediaType = 1 THEN 1 ELSE 0 END), 0) AS videos
+        FROM photos WHERE deleted = 0 AND missing = 0
+        """
+    )
+    fun observeCounts(): Flow<MediaCounts>
+
+    @Query(
+        """
+        SELECT COALESCE(SUM(CASE WHEN mediaType = 0 THEN size ELSE 0 END), 0) AS photoBytes,
+               COALESCE(SUM(CASE WHEN mediaType = 1 THEN size ELSE 0 END), 0) AS videoBytes
+        FROM photos WHERE deleted = 0 AND missing = 0
+        """
+    )
+    fun observeTypeBytes(): Flow<TypeBytes>
+
     @Query("SELECT * FROM photos WHERE id = :id")
     suspend fun get(id: Long): PhotoEntity?
 
-    @Query("SELECT COUNT(*) FROM photos WHERE deleted = 0 AND missing = 0 AND locked = 0")
+    @Query("SELECT COUNT(*) FROM photos WHERE deleted = 0 AND missing = 0 AND locked = 0 AND mediaType = 0")
     suspend fun visibleUnlockedCount(): Int
 
-    @Query("SELECT * FROM photos WHERE deleted = 0 AND missing = 0 AND locked = 0 ORDER BY id LIMIT 1 OFFSET :offset")
+    @Query("SELECT * FROM photos WHERE deleted = 0 AND missing = 0 AND locked = 0 AND mediaType = 0 ORDER BY id LIMIT 1 OFFSET :offset")
     suspend fun unlockedAt(offset: Int): PhotoEntity?
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -46,12 +71,20 @@ interface PhotoDao {
 
     @Query(
         "UPDATE photos SET displayName = :name, size = :size, width = :w, height = :h, " +
-            "dateModified = :modified, missing = 0, lastSeen = :stamp WHERE mediaStoreId = :mediaId"
+            "dateModified = :modified, durationMs = :duration, bucket = :bucket, orientation = :orientation, " +
+            "missing = 0, lastSeen = :stamp WHERE mediaStoreId = :mediaId AND mediaType = :type"
     )
-    suspend fun updateMeta(mediaId: Long, name: String, size: Long, w: Int, h: Int, modified: Long, stamp: Long)
+    suspend fun updateMeta(
+        mediaId: Long, type: Int, name: String, size: Long, w: Int, h: Int, modified: Long,
+        duration: Long, bucket: String, orientation: Int, stamp: Long,
+    )
 
-    @Query("UPDATE photos SET missing = 1 WHERE lastSeen < :stamp")
-    suspend fun markMissing(stamp: Long)
+    // Per type, so a failed/partial video pass can never flag every video as missing (or vice versa).
+    @Query("UPDATE photos SET missing = 1 WHERE mediaType = :type AND lastSeen < :stamp")
+    suspend fun markMissing(type: Int, stamp: Long)
+
+    @Query("UPDATE photos SET lastPositionMs = :positionMs WHERE id = :id")
+    suspend fun setPosition(id: Long, positionMs: Long)
 
     @Query("UPDATE photos SET favorite = :fav, updatedAt = :now WHERE id IN (:ids)")
     suspend fun setFavorite(ids: List<Long>, fav: Boolean, now: Long)
