@@ -9,6 +9,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -79,19 +82,19 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun ViewerScreen(vm: GalleryViewModel, settings: AppSettings, startIndex: Int, onBack: () -> Unit, onEdit: (Long) -> Unit) {
+fun ViewerScreen(vm: GalleryViewModel, settings: AppSettings, startIndex: Int, onBack: () -> Unit, onEdit: (Long) -> Unit, onPlayVideo: (Int) -> Unit) {
     val photos by vm.photos.collectAsStateWithLifecycle()
     val list = photos ?: return Box(Modifier.fillMaxSize().background(Color.Black))
     if (list.isEmpty()) {
         LaunchedEffect(Unit) { onBack() }
         Box(Modifier.fillMaxSize().background(Color.Black))
     } else {
-        ViewerContent(vm, settings, list, startIndex, onBack, onEdit)
+        ViewerContent(vm, settings, list, startIndex, onBack, onEdit, onPlayVideo)
     }
 }
 
 @Composable
-private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: List<PhotoEntity>, startIndex: Int, onBack: () -> Unit, onEdit: (Long) -> Unit) {
+private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: List<PhotoEntity>, startIndex: Int, onBack: () -> Unit, onEdit: (Long) -> Unit, onPlayVideo: (Int) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, list.size - 1)) { list.size }
@@ -122,8 +125,17 @@ private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: Lis
             if (p.locked) {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Lock, null, tint = Gold, modifier = Modifier.padding(8.dp))
-                    Text("This photo is locked", color = Color.White)
+                    Text(if (p.isVideo) "This video is locked" else "This photo is locked", color = Color.White)
                     Button(onClick = { unlockFor = p }, modifier = Modifier.padding(top = 12.dp)) { Text("Unlock") }
+                }
+            } else if (p.isVideo) {
+                // Swiping onto a video shows its poster frame; tapping play opens the dedicated player. Nothing autoplays here.
+                Box(Modifier.fillMaxSize().clickable { onPlayVideo(page) }, contentAlignment = Alignment.Center) {
+                    AsyncImage(p.contentUri, p.displayName, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                    Icon(
+                        Icons.Default.PlayArrow, "Play video", tint = Color.White,
+                        modifier = Modifier.size(72.dp).background(Color.Black.copy(alpha = .5f), CircleShape).padding(12.dp),
+                    )
                 }
             } else {
                 ZoomableImage(p.contentUri, p.displayName, onTap = { chrome = !chrome }) { if (page == pager.currentPage) zoomed = it }
@@ -151,8 +163,8 @@ private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: Lis
                     Icon(if (photo?.favorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         if (photo?.favorite == true) "Remove from favorites" else "Add to favorites", tint = if (photo?.favorite == true) Gold else Color.White)
                 }
-                IconButton(onClick = { showInfo = true }, enabled = usable) { Icon(Icons.Default.Info, "Photo details", tint = Color.White) }
-                IconButton(onClick = { photo?.let { onEdit(it.id) } }, enabled = usable) { Icon(Icons.Default.Edit, "Edit photo", tint = Color.White) }
+                IconButton(onClick = { showInfo = true }, enabled = usable) { Icon(Icons.Default.Info, "Details", tint = Color.White) }
+                IconButton(onClick = { photo?.let { onEdit(it.id) } }, enabled = usable && photo?.isVideo != true) { Icon(Icons.Default.Edit, "Edit photo", tint = Color.White) }
                 IconButton(onClick = {
                     photo?.let {
                         val send = Intent(Intent.ACTION_SEND).apply {
@@ -189,6 +201,8 @@ private fun InfoDialog(vm: GalleryViewModel, p: PhotoEntity, onDismiss: () -> Un
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("File: ${p.displayName}")
+                if (p.isVideo) Text("Duration: ${com.vaultgallery.app.util.formatDuration(p.durationMs)}")
+                if (p.bucket.isNotBlank()) Text("Folder: ${p.bucket}")
                 Text("Size: ${Formatter.formatShortFileSize(ctx, p.size)}")
                 if (p.width > 0) Text("Dimensions: ${p.width} × ${p.height}")
                 Text("Taken: ${fmt.format(Date(p.dateTaken))}")
