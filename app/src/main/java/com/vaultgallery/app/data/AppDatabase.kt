@@ -4,13 +4,15 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
         PhotoEntity::class, TagEntity::class, PhotoTagCrossRef::class, RecentPhotoEntity::class,
         WalletEntity::class, WalletTransactionEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,9 +24,21 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: AppDatabase? = null
 
-        // Future schema changes must ship a Migration here. Never use destructive fallback.
+        /**
+         * v1 -> v2: video support. Purely additive: new columns get defaults (every existing row is an IMAGE),
+         * and the unique index widens from (mediaStoreId) to (mediaStoreId, mediaType). No row is touched or dropped,
+         * so favorites, tags, trash, locks, recents and wallet all survive.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MigrationSql.V1_TO_V2.forEach { db.execSQL(it) }
+            }
+        }
+
+        // Never use destructive fallback: every schema change must ship a Migration.
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "vault_gallery.db")
+                .addMigrations(MIGRATION_1_2)
                 .build().also { instance = it }
         }
     }
