@@ -3,12 +3,13 @@ package com.vaultgallery.app.data
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Ignore
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "photos",
-    indices = [Index(value = ["mediaStoreId"], unique = true), Index("deleted"), Index("favorite"), Index("dateTaken")]
+    indices = [Index(value = ["mediaStoreId", "mediaType"], unique = true), Index("deleted"), Index("favorite"), Index("dateTaken"), Index("mediaType")]
 )
 data class PhotoEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -38,7 +39,21 @@ data class PhotoEntity(
     val lastSeen: Long = 0,
     val createdAt: Long,
     val updatedAt: Long,
-)
+    // Added in DB v2 (video support). Defaults must match MIGRATION_1_2 exactly.
+    @ColumnInfo(defaultValue = "0") val mediaType: Int = MediaType.IMAGE,
+    @ColumnInfo(defaultValue = "0") val durationMs: Long = 0,
+    @ColumnInfo(defaultValue = "''") val bucket: String = "",
+    @ColumnInfo(defaultValue = "0") val orientation: Int = 0,
+    @ColumnInfo(defaultValue = "0") val lastPositionMs: Long = 0,
+) {
+    @get:Ignore val isVideo: Boolean get() = mediaType == MediaType.VIDEO
+}
+
+/** Stored as Int so queries stay trivial and the column default is 0 (= IMAGE) for every pre-video row. */
+object MediaType {
+    const val IMAGE = 0
+    const val VIDEO = 1
+}
 
 @Entity(tableName = "tags", indices = [Index(value = ["name"], unique = true)])
 data class TagEntity(
@@ -81,3 +96,6 @@ data class WalletTransactionEntity(
 )
 
 data class TagCount(val id: Long, val name: String, val photoCount: Int)
+
+data class MediaCounts(val total: Int, val photos: Int, val videos: Int)
+data class TypeBytes(val photoBytes: Long, val videoBytes: Long)
