@@ -36,3 +36,15 @@ web localStorage JSON import, WorkManager jobs. Lint currently reports without f
 - In the web app every imported photo was locked by default. On Android that would lock your whole camera roll, so photos are **unlocked by default** and you lock them via selection mode.
 - Blur in the editor preview needs Android 12+; saved copies apply blur on all versions.
 - This project has not been compiled yet. The first CI run is the first compile; expect to iterate on any errors it reports.
+
+
+## Video support (DB v2)
+
+* Videos are discovered from `MediaStore.Video` automatically, next to images, into the same `photos` table
+  (`mediaType` 0 = image, 1 = video). Migration `MigrationSql.V1_TO_V2` is additive; existing rows read as images.
+* Player: Media3 `ExoPlayer` + `PlayerView` (controller hidden) with Compose controls in `VideoPlayerScreen.kt`.
+  The Media3 version is one value in `app/build.gradle.kts` (`val media3`). If CI reports a `compileSdk` requirement
+  from Media3, either raise `compileSdk` (and AGP/Gradle as the message says) or lower that value.
+* Video thumbnails use Coil's `VideoFrameDecoder` (configured in `VaultApp`).
+* Not implemented yet: encryption of private media, background playback / MediaSession, video playback inside the
+  slideshow, video trim/editor, duplicate detection, backup/restore, WorkManager indexing, Paging.
