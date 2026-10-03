@@ -32,6 +32,7 @@ import com.vaultgallery.app.ui.screens.LockScreen
 import com.vaultgallery.app.ui.screens.PermissionGate
 import com.vaultgallery.app.ui.screens.SettingsScreen
 import com.vaultgallery.app.ui.screens.TrashScreen
+import com.vaultgallery.app.ui.screens.VideoPlayerScreen
 import com.vaultgallery.app.ui.screens.ViewerScreen
 import com.vaultgallery.app.ui.theme.VaultTheme
 import kotlinx.coroutines.launch
@@ -98,10 +99,20 @@ class MainActivity : AppCompatActivity() {
         val pinManager = remember { pin }
         NavHost(nav, startDestination = "gallery") {
             composable("gallery") {
-                GalleryScreen(vm, settings, onOpen = { nav.navigate("viewer/$it") }, onSettings = { nav.navigate("settings") }, onTrash = { nav.navigate("trash") })
+                // Videos open the dedicated player; photos open the photo viewer. Both use the same list index.
+                val open: (Int) -> Unit = { i ->
+                    if (vm.photos.value?.getOrNull(i)?.isVideo == true) nav.navigate("video/$i") else nav.navigate("viewer/$i")
+                }
+                GalleryScreen(vm, settings, onOpen = open, onSettings = { nav.navigate("settings") }, onTrash = { nav.navigate("trash") })
             }
             composable("viewer/{index}", arguments = listOf(navArgument("index") { type = NavType.IntType })) {
-                ViewerScreen(vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() }, onEdit = { id -> nav.navigate("editor/$id") })
+                ViewerScreen(
+                    vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() },
+                    onEdit = { id -> nav.navigate("editor/$id") }, onPlayVideo = { i -> nav.navigate("video/$i") },
+                )
+            }
+            composable("video/{index}", arguments = listOf(navArgument("index") { type = NavType.IntType })) {
+                VideoPlayerScreen(vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() })
             }
             composable("editor/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                 EditorScreen(vm, it.arguments?.getLong("id") ?: -1L, onBack = { nav.popBackStack() })
