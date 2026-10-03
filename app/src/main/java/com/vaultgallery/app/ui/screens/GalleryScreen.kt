@@ -42,6 +42,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -71,7 +76,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import coil.compose.AsyncImage
+import com.vaultgallery.app.security.AppLockManager
+import com.vaultgallery.app.util.displayHeight
+import com.vaultgallery.app.util.displayWidth
+import java.text.NumberFormat
 import com.vaultgallery.app.GalleryViewModel
 import com.vaultgallery.app.data.AppSettings
 import com.vaultgallery.app.data.PhotoEntity
@@ -79,6 +96,7 @@ import com.vaultgallery.app.data.SettingsKeys
 import com.vaultgallery.app.domain.UnlockResult
 import com.vaultgallery.app.ui.components.ConfirmDialog
 import com.vaultgallery.app.ui.components.ManageTagsDialog
+import com.vaultgallery.app.ui.components.MediaThumb
 import com.vaultgallery.app.ui.components.PhotoCard
 import com.vaultgallery.app.ui.components.TagPickerDialog
 import com.vaultgallery.app.ui.components.UnlockDialog
@@ -103,6 +121,13 @@ fun GalleryScreen(
     val recent by vm.recent.collectAsStateWithLifecycle()
     val wallet by vm.wallet.collectAsStateWithLifecycle()
     val bytes by vm.totalBytes.collectAsStateWithLifecycle()
+    val counts by vm.counts.collectAsStateWithLifecycle()
+    var videoAccess by remember { mutableStateOf(hasVideoAccess(ctx)) }
+    val videoPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        videoAccess = hasVideoAccess(ctx); if (videoAccess) vm.scan()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { videoAccess = hasVideoAccess(ctx) }
+    val numbers = remember { NumberFormat.getIntegerInstance() }
 
     val list = photos ?: emptyList()
     val selecting = selection.isNotEmpty()
@@ -133,7 +158,7 @@ fun GalleryScreen(
                         Column {
                             Text("Vault Gallery", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.secondary)
                             Text(
-                                "${list.size} photos · ${Formatter.formatShortFileSize(ctx, bytes)}",
+                                "${numbers.format(counts.total)} items · ${Formatter.formatShortFileSize(ctx, bytes)}",
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -152,7 +177,7 @@ fun GalleryScreen(
                                         trailingIcon = { if (settings.layout == i) Icon(Icons.Default.Check, "Selected") },
                                         onClick = { vm.setSetting(SettingsKeys.LAYOUT, i); menu = false })
                                 }
-                                listOf("Newest first", "Oldest first", "Name", "Largest first").forEachIndexed { i, l ->
+                                listOf("Newest first", "Oldest first", "Name A–Z", "Largest first", "Name Z–A", "Longest first").forEachIndexed { i, l ->
                                     DropdownMenuItem(
                                         text = { Text("Sort: $l") },
                                         trailingIcon = { if (settings.sort == i) Icon(Icons.Default.Check, "Selected") },
@@ -160,7 +185,7 @@ fun GalleryScreen(
                                 }
                                 DropdownMenuItem(text = { Text("Trash") }, onClick = { menu = false; onTrash() })
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { menu = false; onSettings() })
-                                DropdownMenuItem(text = { Text("Rescan photos") }, onClick = { menu = false; vm.scan() })
+                                DropdownMenuItem(text = { Text("Rescan media") }, onClick = { menu = false; vm.scan() })
                             }
                         }
                     },
@@ -174,7 +199,7 @@ fun GalleryScreen(
                     IconButton(onClick = { vm.setFavorite(selection, true) }) { Icon(Icons.Default.Favorite, "Favorite selected") }
                     IconButton(onClick = { vm.setFavorite(selection, false) }) { Icon(Icons.Default.FavoriteBorder, "Unfavorite selected") }
                     IconButton(onClick = { tagPicker = true }) { Icon(Icons.Default.Sell, "Edit tags of selected") }
-                    IconButton(onClick = { confirmLock = true }) { Icon(Icons.Default.Lock, "Lock selected photos") }
+                    IconButton(onClick = { confirmLock = true }) { Icon(Icons.Default.Lock, "Lock selected items") }
                     IconButton(onClick = { confirmTrash = true }) { Icon(Icons.Default.Delete, "Move selected to trash") }
                 })
             }
@@ -186,12 +211,23 @@ fun GalleryScreen(
             }
             OutlinedTextField(
                 value = query, onValueChange = { vm.query.value = it },
-                placeholder = { Text("Search name, caption or tag") }, singleLine = true,
+                placeholder = { Text("Search name, folder, caption or tag") }, singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Default.Clear, "Clear search") } },
                 shape = RoundedCornerShape(50),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
+            // ALL | PHOTOS | VIDEOS. Counts come straight from the database; the choice is remembered.
+            val filterOptions = listOf(-1 to "All ${numbers.format(counts.total)}", 0 to "Photos ${numbers.format(counts.photos)}", 1 to "Videos ${numbers.format(counts.videos)}")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                filterOptions.forEachIndexed { i, (type, label) ->
+                    SegmentedButton(
+                        selected = settings.mediaFilter == type,
+                        onClick = { vm.setMediaFilter(type) },
+                        shape = SegmentedButtonDefaults.itemShape(i, filterOptions.size),
+                    ) { Text(label, maxLines = 1) }
+                }
+            }
             LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     FilterChip(selected = !favOnly && tagFilter < 0, onClick = { vm.favoritesOnly.value = false; vm.tagFilter.value = -1 },
@@ -208,7 +244,7 @@ fun GalleryScreen(
                 item { AssistChip(onClick = { manageTags = true }, label = { Text("Manage tags") }) }
             }
 
-            val showStrips = query.isEmpty() && !favOnly && tagFilter < 0 && !selecting
+            val showStrips = query.isEmpty() && !favOnly && tagFilter < 0 && !selecting && settings.mediaFilter != 1
             val click: (Int, PhotoEntity) -> Unit = { index, p ->
                 when {
                     selecting -> vm.toggleSelect(p.id)
@@ -222,7 +258,21 @@ fun GalleryScreen(
             when {
                 photos == null -> Unit
                 list.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(if (query.isNotEmpty() || favOnly || tagFilter >= 0) "No photos match your filters" else "No photos found yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (settings.mediaFilter == 1 && !videoAccess && query.isEmpty() && !favOnly && tagFilter < 0) {
+                        // Video permission missing: explain why, offer the grant and an app-settings shortcut. Never crashes.
+                        Column(Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Allow access to your videos", style = MaterialTheme.typography.titleMedium)
+                            Text("Vault Gallery needs permission to read videos on this device. Nothing is uploaded; the app has no internet permission.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Button(onClick = { AppLockManager.skipNextLock = true; videoPermLauncher.launch(videoPermissions()) }) { Text("Allow video access") }
+                            OutlinedButton(onClick = {
+                                AppLockManager.skipNextLock = true
+                                ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
+                            }) { Text("Open app settings") }
+                        }
+                    } else {
+                        val noun = when (settings.mediaFilter) { 0 -> "photos"; 1 -> "videos"; else -> "photos or videos" }
+                        Text(if (query.isNotEmpty() || favOnly || tagFilter >= 0) "No $noun match your filters" else "No $noun found yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 settings.layout == 3 -> LazyVerticalStaggeredGrid(
                     columns = StaggeredGridCells.Fixed(2), contentPadding = PaddingValues(12.dp),
@@ -231,7 +281,7 @@ fun GalleryScreen(
                     if (showStrips) item(span = StaggeredGridItemSpan.FullLine) { strips() }
                     itemsIndexed(list, key = { _, p -> p.id }) { i, p ->
                         PhotoCard(p, p.id in selection, selecting, settings.showNames, Modifier.fillMaxWidth().aspectOf(p),
-                            { click(i, p) }, { vm.toggleSelect(p.id) }, { vm.toggleFavorite(p) })
+                            { click(i, p) }, { vm.toggleSelect(p.id) }, { vm.toggleFavorite(p) }, settings.videoShowDuration)
                     }
                 }
                 else -> {
@@ -244,7 +294,7 @@ fun GalleryScreen(
                         itemsIndexed(list, key = { _, p -> p.id }) { i, p ->
                             PhotoCard(p, p.id in selection, selecting, settings.showNames,
                                 Modifier.fillMaxWidth().then(if (cols == 1) Modifier.height(220.dp) else Modifier.aspectRatio(1f)),
-                                { click(i, p) }, { vm.toggleSelect(p.id) }, { vm.toggleFavorite(p) })
+                                { click(i, p) }, { vm.toggleSelect(p.id) }, { vm.toggleFavorite(p) }, settings.videoShowDuration)
                         }
                     }
                 }
@@ -252,8 +302,8 @@ fun GalleryScreen(
         }
     }
 
-    if (confirmTrash) ConfirmDialog("Move to trash?", "${selection.size} photo(s) will move to the app's trash. You can restore them later.", "Move to trash", { vm.trash(selection.toSet()) }, { confirmTrash = false })
-    if (confirmLock) ConfirmDialog("Lock photos?", "${selection.size} photo(s) will be locked and need Stars or Coins to open.", "Lock", { vm.lockPhotos(selection.toSet()) }, { confirmLock = false })
+    if (confirmTrash) ConfirmDialog("Move to trash?", "${selection.size} item(s) will move to the app's trash. You can restore them later.", "Move to trash", { vm.trash(selection.toSet()) }, { confirmTrash = false })
+    if (confirmLock) ConfirmDialog("Lock items?", "${selection.size} item(s) will be locked and need Stars or Coins to open.", "Lock", { vm.lockPhotos(selection.toSet()) }, { confirmLock = false })
     if (tagPicker) TagPickerDialog(tags, { vm.addTag(selection, it) }, { vm.removeTag(selection, it) }, vm::createTag) { tagPicker = false }
     if (manageTags) ManageTagsDialog(tags, vm::renameTag, vm::deleteTag, vm::createTag) { manageTags = false }
     unlockFor?.let { p ->
@@ -271,8 +321,10 @@ fun GalleryScreen(
     }
 }
 
-private fun Modifier.aspectOf(p: PhotoEntity): Modifier =
-    this.aspectRatio(if (p.width > 0 && p.height > 0) (p.width.toFloat() / p.height).coerceIn(0.5f, 2f) else 1f)
+private fun Modifier.aspectOf(p: PhotoEntity): Modifier {
+    val w = p.displayWidth(); val h = p.displayHeight()
+    return this.aspectRatio(if (w > 0 && h > 0) (w.toFloat() / h).coerceIn(0.5f, 2f) else 1f)
+}
 
 @Composable
 private fun Strips(potd: PhotoEntity?, recent: List<PhotoEntity>, onOpen: (PhotoEntity) -> Unit) {
@@ -287,8 +339,7 @@ private fun Strips(potd: PhotoEntity?, recent: List<PhotoEntity>, onOpen: (Photo
             Text("Recently viewed", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(recent, key = { it.id }) { p ->
-                    AsyncImage(p.contentUri, p.displayName, contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onOpen(p) })
+                    MediaThumb(p, Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onOpen(p) })
                 }
             }
         }
