@@ -1,6 +1,8 @@
 package com.vaultgallery.app.ui.screens
 
+import android.text.format.Formatter
 import android.widget.Toast
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -61,11 +63,22 @@ fun SettingsScreen(vm: GalleryViewModel, settings: AppSettings, pin: PinManager,
                 Choices("Gallery layout", listOf("1 col", "2 cols", "3 cols", "Masonry"), settings.layout) { vm.setSetting(SettingsKeys.LAYOUT, it) }
             }
             section("Gallery") {
-                Choices("Sort order", listOf("Newest", "Oldest", "Name", "Largest"), settings.sort) { vm.setSetting(SettingsKeys.SORT, it) }
+                Choices("Sort order", listOf("Newest", "Oldest", "Name A–Z", "Largest", "Name Z–A", "Longest"), settings.sort) { vm.setSetting(SettingsKeys.SORT, it) }
                 Choices("Slideshow speed", listOf("2 s", "3 s", "5 s", "10 s"), listOf(2, 3, 5, 10).indexOf(settings.slideshowSec).coerceAtLeast(0)) {
                     vm.setSetting(SettingsKeys.SLIDESHOW, listOf(2, 3, 5, 10)[it])
                 }
                 Toggle("Show file names on thumbnails", settings.showNames) { vm.setSetting(SettingsKeys.SHOW_NAMES, it) }
+            }
+            section("Video") {
+                Toggle("Play next video automatically", settings.videoAutoNext) { vm.setSetting(SettingsKeys.VIDEO_AUTO_NEXT, it) }
+                Text("Off by default: when a video ends you can replay it instead.", style = MaterialTheme.typography.labelSmall)
+                val speeds = listOf(50, 75, 100, 125, 150, 200)
+                Choices("Default playback speed", listOf("0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"), speeds.indexOf(settings.videoSpeedPct).coerceAtLeast(2)) {
+                    vm.setSetting(SettingsKeys.VIDEO_SPEED, speeds[it])
+                }
+                Toggle("Remember playback position", settings.videoRememberPosition) { vm.setSetting(SettingsKeys.VIDEO_REMEMBER_POS, it) }
+                Toggle("Keep screen awake during playback", settings.videoKeepAwake) { vm.setSetting(SettingsKeys.VIDEO_KEEP_AWAKE, it) }
+                Toggle("Show video duration on thumbnails", settings.videoShowDuration) { vm.setSetting(SettingsKeys.VIDEO_SHOW_DURATION, it) }
             }
             section("Privacy & security") {
                 Toggle("App lock (PIN)", settings.appLock) { on ->
@@ -85,9 +98,12 @@ fun SettingsScreen(vm: GalleryViewModel, settings: AppSettings, pin: PinManager,
                 Text("When app lock is on, the app also hides its contents in the recent-apps screen.", style = MaterialTheme.typography.labelSmall)
             }
             section("Storage") {
+                val tb by vm.typeBytes.collectAsStateWithLifecycle()
+                Text("Photos: ${Formatter.formatShortFileSize(ctx, tb.photoBytes)}")
+                Text("Videos: ${Formatter.formatShortFileSize(ctx, tb.videoBytes)}")
                 OutlinedButton(onClick = {
                     ctx.imageLoader.memoryCache?.clear(); ctx.imageLoader.diskCache?.clear()
-                    Toast.makeText(ctx, "Thumbnail cache cleared. Your photos are untouched.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Thumbnail cache cleared. Your photos and videos are untouched.", Toast.LENGTH_SHORT).show()
                 }) { Text("Clear thumbnail cache") }
             }
             if (BuildConfig.DEBUG) {
