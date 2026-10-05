@@ -16,6 +16,9 @@ interface PhotoDao {
         WHERE p.deleted = 0 AND p.missing = 0
           AND (:type < 0 OR p.mediaType = :type)
           AND (:fav = 0 OR p.favorite = 1)
+          AND (:bucketOn = 0 OR p.bucket = :bucket)
+          AND (:minSize <= 0 OR p.size >= :minSize)
+          AND (:since <= 0 OR p.dateAdded > :since)
           AND (:tagId < 0 OR EXISTS (SELECT 1 FROM photo_tags x WHERE x.photoId = p.id AND x.tagId = :tagId))
           AND (:q = '' OR p.displayName LIKE '%' || :q || '%' OR p.caption LIKE '%' || :q || '%'
                OR p.bucket LIKE '%' || :q || '%'
@@ -29,7 +32,46 @@ interface PhotoDao {
                  p.dateTaken DESC
         """
     )
-    fun observe(q: String, type: Int, fav: Int, tagId: Long, sort: Int): Flow<List<PhotoEntity>>
+    fun observe(
+        q: String, type: Int, fav: Int, tagId: Long, sort: Int,
+        bucketOn: Int, bucket: String, minSize: Long, since: Long,
+    ): Flow<List<PhotoEntity>>
+
+    // ---- smart albums: grouped by the real MediaStore bucket; the cover is the newest non-locked item ----
+    @Query(
+        """
+        SELECT p.bucket AS bucket, COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN p.mediaType = 0 THEN 1 ELSE 0 END), 0) AS photos,
+               COALESCE(SUM(CASE WHEN p.mediaType = 1 THEN 1 ELSE 0 END), 0) AS videos,
+               (SELECT c.contentUri FROM photos c
+                 WHERE c.bucket = p.bucket AND c.deleted = 0 AND c.missing = 0 AND c.locked = 0
+                 ORDER BY c.dateTaken DESC LIMIT 1) AS coverUri
+        FROM photos p WHERE p.deleted = 0 AND p.missing = 0
+        GROUP BY p.bucket ORDER BY total DESC
+        """
+    )
+    fun observeAlbums(): Flow<List<AlbumInfo>>
+
+    // "N new items" indicator: real files added after the last time the user looked.
+    @Query("SELECT COUNT(*) FROM photos WHERE deleted = 0 AND missing = 0 AND dateAdded > :since")
+    fun observeNewCount(since: Long): Flow<Int>
+
+    // ---- storage analyzer ----
+    @Query("SELECT COALESCE(SUM(size), 0) FROM photos WHERE deleted = 1 AND missing = 0")
+    fun observeTrashBytes(): Flow<Long>
+
+    @Query("SELECT * FROM photos WHERE deleted = 0 AND missing = 0 AND mediaType = :type ORDER BY size DESC LIMIT :limit")
+    fun observeLargest(type: Int, limit: Int): Flow<List<PhotoEntity>>
+
+    @Query("SELECT * FROM photos WHERE deleted = 0 AND missing = 0 AND dateAdded > :since ORDER BY size DESC LIMIT :limit")
+    fun observeRecentLarge(since: Long, limit: Int): Flow<List<PhotoEntity>>
+
+    @Query("SELECT * FROM photos WHERE id IN (:ids)")
+    suspend fun getAll(ids: List<Long>): List<PhotoEntity>
+
+    // Sharing never includes wallet-locked items.
+    @Query("SELECT contentUri FROM photos WHERE id IN (:ids) AND locked = 0")
+    suspend fun unlockedUris(ids: List<Long>): List<String>
 
     @Query("SELECT * FROM photos WHERE deleted = 1 AND missing = 0 ORDER BY trashedAt DESC")
     fun observeTrash(): Flow<List<PhotoEntity>>
@@ -176,4 +218,34 @@ interface WalletDao {
 
     @Insert
     suspend fun insertTx(tx: WalletTransactionEntity)
+}
+
+@Dao
+interface VaultDao {
+    @Query("SELECT * FROM vault_items WHERE (:q = '' OR displayName LIKE '%' || :q || '%') ORDER BY hiddenAt DESC")
+    fun observe(q: String): Flow<List<VaultItemEntity>>
+
+    @Query("SELECT COUNT(*) FROM vault_items")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(SUM(size), 0) FROM vault_items")
+    fun observeBytes(): Flow<Long>
+
+    @Query("SELECT * FROM vault_items WHERE id = :id")
+    suspend fun get(id: Long): VaultItemEntity?
+
+    @Query("SELECT * FROM vault_items WHERE id IN (:ids)")
+    suspend fun getAll(ids: List<Long>): List<VaultItemEntity>
+
+    @Query("SELECT fileName, thumbName FROM vault_items")
+    suspend fun allNames(): List<VaultNames>
+
+    @Insert
+    suspend fun insert(item: VaultItemEntity): Long
+
+    @Query("UPDATE vault_items SET favorite = :fav WHERE id IN (:ids)")
+    suspend fun setFavorite(ids: List<Long>, fav: Boolean)
+
+    @Query("DELETE FROM vault_items WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 }
