@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Favorite
@@ -107,6 +109,7 @@ import com.vaultgallery.app.data.PhotoEntity
 import com.vaultgallery.app.domain.UnlockResult
 import com.vaultgallery.app.security.AppLockManager
 import com.vaultgallery.app.ui.components.ConfirmDialog
+import com.vaultgallery.app.ui.components.LocalVaultAuth
 import com.vaultgallery.app.ui.components.UnlockDialog
 import com.vaultgallery.app.ui.theme.Gold
 import com.vaultgallery.app.util.PLAYBACK_SPEEDS
@@ -132,7 +135,7 @@ private const val AUTO_HIDE_MS = 3_500L
  * filter/sort/search), so Previous/Next walk the videos in that exact order.
  */
 @Composable
-fun VideoPlayerScreen(vm: GalleryViewModel, settings: AppSettings, startIndex: Int, onBack: () -> Unit) {
+fun VideoPlayerScreen(vm: GalleryViewModel, settings: AppSettings, startIndex: Int, onBack: () -> Unit, onTools: (Long) -> Unit) {
     val all by vm.photos.collectAsStateWithLifecycle()
     val list = all ?: return Box(Modifier.fillMaxSize().background(Color.Black))
     val videos = remember(list) { list.filter { it.isVideo } }
@@ -162,7 +165,7 @@ fun VideoPlayerScreen(vm: GalleryViewModel, settings: AppSettings, startIndex: I
             hasPrev = idx > 0, hasNext = idx < videos.size - 1,
             onPrev = { videos.getOrNull(idx - 1)?.let { currentId = it.id } },
             onNext = { videos.getOrNull(idx + 1)?.let { currentId = it.id } },
-            onBack = onBack,
+            onBack = onBack, onTools = onTools,
         )
     }
 }
@@ -199,7 +202,7 @@ private fun LockedVideoPane(vm: GalleryViewModel, video: PhotoEntity, onBack: ()
 @Composable
 private fun PlayerPane(
     vm: GalleryViewModel, settings: AppSettings, video: PhotoEntity, ordinal: Int, total: Int,
-    hasPrev: Boolean, hasNext: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onBack: () -> Unit,
+    hasPrev: Boolean, hasNext: Boolean, onPrev: () -> Unit, onNext: () -> Unit, onBack: () -> Unit, onTools: (Long) -> Unit,
 ) {
     val ctx = LocalContext.current
     val view = LocalView.current
@@ -217,6 +220,8 @@ private fun PlayerPane(
     var moreMenu by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
+    var confirmHide by remember { mutableStateOf(false) }
+    val auth = LocalVaultAuth.current
 
     // ---- player state ----
     var isPlaying by remember { mutableStateOf(false) }
@@ -434,6 +439,8 @@ private fun PlayerPane(
                             leadingIcon = { Icon(if (video.favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null) },
                             onClick = { moreMenu = false; vm.toggleFavorite(video) })
                         DropdownMenuItem(text = { Text("Share") }, leadingIcon = { Icon(Icons.Default.Share, null) }, onClick = { moreMenu = false; share() })
+                        DropdownMenuItem(text = { Text("Trim, mute or save frame") }, leadingIcon = { Icon(Icons.Default.ContentCut, null) }, onClick = { moreMenu = false; exo.pause(); onTools(video.id) })
+                        DropdownMenuItem(text = { Text("Hide in Vault") }, leadingIcon = { Icon(Icons.Default.VisibilityOff, null) }, onClick = { moreMenu = false; confirmHide = true })
                         DropdownMenuItem(text = { Text("Move to trash") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { moreMenu = false; confirmTrash = true })
                     }
                 }
@@ -518,6 +525,10 @@ private fun PlayerPane(
     }
 
     if (confirmTrash) ConfirmDialog("Move to trash?", "You can restore this video from Trash later.", "Move to trash", { vm.trash(listOf(video.id)) }, { confirmTrash = false })
+    if (confirmHide) ConfirmDialog(
+        "Hide in Vault?", "This video will be encrypted in the Vault and removed from your Gallery and other apps. Android will ask you to confirm deleting the original.",
+        "Continue", { exo.pause(); auth.require { vm.hide(listOf(video.id)) } }, { confirmHide = false },
+    )
     if (showInfo) VideoInfoDialog(vm, video) { showInfo = false }
 }
 
