@@ -5,6 +5,15 @@ import android.net.Uri
 import android.text.format.Formatter
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.ui.draw.scale
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -74,7 +83,12 @@ import com.vaultgallery.app.data.AppSettings
 import com.vaultgallery.app.data.PhotoEntity
 import com.vaultgallery.app.domain.UnlockResult
 import com.vaultgallery.app.security.AppLockManager
+import com.vaultgallery.app.ui.components.AppSheet
 import com.vaultgallery.app.ui.components.ConfirmDialog
+import com.vaultgallery.app.ui.components.LocalVaultAuth
+import com.vaultgallery.app.ui.components.SheetAction
+import com.vaultgallery.app.ui.theme.LocalAnimations
+import com.vaultgallery.app.util.shareMedia
 import com.vaultgallery.app.ui.components.UnlockDialog
 import com.vaultgallery.app.ui.theme.Gold
 import kotlinx.coroutines.launch
@@ -104,6 +118,12 @@ private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: Lis
     var playing by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
+    var moreSheet by remember { mutableStateOf(false) }
+    var confirmHide by remember { mutableStateOf(false) }
+    val auth = LocalVaultAuth.current
+    val anim = LocalAnimations.current
+    val enterAnim = if (anim) fadeIn() else EnterTransition.None
+    val exitAnim = if (anim) fadeOut() else ExitTransition.None
     var unlockFor by remember { mutableStateOf<PhotoEntity?>(null) }
     val photo = list.getOrNull(pager.currentPage)
     val progress = remember { Animatable(0f) }
@@ -142,7 +162,7 @@ private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: Lis
             }
         }
 
-        AnimatedVisibility(chrome, Modifier.align(Alignment.TopCenter)) {
+        AnimatedVisibility(chrome, Modifier.align(Alignment.TopCenter), enter = enterAnim, exit = exitAnim) {
             Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .55f)).statusBarsPadding()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White) }
@@ -156,29 +176,39 @@ private fun ViewerContent(vm: GalleryViewModel, settings: AppSettings, list: Lis
             }
         }
 
-        AnimatedVisibility(chrome, Modifier.align(Alignment.BottomCenter)) {
+        AnimatedVisibility(chrome, Modifier.align(Alignment.BottomCenter), enter = enterAnim, exit = exitAnim) {
             Row(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .55f)).navigationBarsPadding(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 val usable = photo != null && !photo.locked
+                val fav = photo?.favorite == true
+                val heart by animateFloatAsState(if (fav && anim) 1.2f else 1f, spring(dampingRatio = 0.4f), label = "heart")
                 IconButton(onClick = { photo?.let(vm::toggleFavorite) }, enabled = usable) {
-                    Icon(if (photo?.favorite == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        if (photo?.favorite == true) "Remove from favorites" else "Add to favorites", tint = if (photo?.favorite == true) Gold else Color.White)
+                    Icon(
+                        if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        if (fav) "Remove from favorites" else "Add to favorites", tint = if (fav) Gold else Color.White,
+                        modifier = Modifier.scale(heart),
+                    )
                 }
-                IconButton(onClick = { showInfo = true }, enabled = usable) { Icon(Icons.Default.Info, "Details", tint = Color.White) }
-                IconButton(onClick = { photo?.let { onEdit(it.id) } }, enabled = usable && photo?.isVideo != true) { Icon(Icons.Default.Edit, "Edit photo", tint = Color.White) }
                 IconButton(onClick = {
-                    photo?.let {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = it.mimeType; putExtra(Intent.EXTRA_STREAM, Uri.parse(it.contentUri)); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        AppLockManager.skipNextLock = true
-                        ctx.startActivity(Intent.createChooser(send, "Share photo").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                    }
-                }, enabled = usable) { Icon(Icons.Default.Share, "Share photo", tint = Color.White) }
+                    photo?.let { ctx.shareMedia(listOf(Uri.parse(it.contentUri)), listOf(it.mimeType), if (it.isVideo) "Share video" else "Share photo") }
+                }, enabled = usable) { Icon(Icons.Default.Share, "Share", tint = Color.White) }
                 IconButton(onClick = { confirmTrash = true }, enabled = photo != null) { Icon(Icons.Default.Delete, "Move to trash", tint = Color.White) }
+                IconButton(onClick = { moreSheet = true }, enabled = photo != null) { Icon(Icons.Default.MoreVert, "More actions", tint = Color.White) }
             }
         }
     }
 
+    if (moreSheet && photo != null) {
+        val usable = !photo.locked
+        AppSheet(onDismiss = { moreSheet = false }) {
+            if (!photo.isVideo) SheetAction(Icons.Default.Edit, "Edit", enabled = usable) { moreSheet = false; onEdit(photo.id) }
+            SheetAction(Icons.Default.Info, "Info", enabled = usable) { moreSheet = false; showInfo = true }
+            SheetAction(Icons.Default.VisibilityOff, "Hide in Vault", enabled = usable) { moreSheet = false; confirmHide = true }
+        }
+    }
+    if (confirmHide && photo != null) ConfirmDialog(
+        "Hide in Vault?", "This item will be encrypted in the Vault and removed from your Gallery and other apps. Android will ask you to confirm deleting the original.",
+        "Continue", { auth.require { vm.hide(listOf(photo.id)) } }, { confirmHide = false },
+    )
     if (confirmTrash && photo != null) ConfirmDialog("Move to trash?", "You can restore it from Trash later.", "Move to trash", { vm.trash(listOf(photo.id)) }, { confirmTrash = false })
     if (showInfo && photo != null) InfoDialog(vm, photo) { showInfo = false }
     unlockFor?.let { p ->
