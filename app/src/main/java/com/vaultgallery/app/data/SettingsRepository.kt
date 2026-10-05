@@ -5,13 +5,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.settingsStore by preferencesDataStore("settings")
 
-/** theme: 0 system, 1 dark, 2 light. layout: 0 = 1 col, 1 = 2 col, 2 = 3 col, 3 = masonry.
+/** theme: 0 system, 1 dark, 2 light, 3 AMOLED black. layout: 0 = 1 col, 1 = 2 col, 2 = 3 col, 3 = masonry.
  *  sort: 0 newest, 1 oldest, 2 name A-Z, 3 largest, 4 name Z-A, 5 longest (videos).
  *  mediaFilter: -1 all, 0 photos, 1 videos (remembered between launches).
  *  videoSpeedPct: default playback speed as a percentage (100 = 1.0x). Nothing secret lives here (PIN verifier is in PinManager). */
@@ -31,6 +32,15 @@ data class AppSettings(
     val videoRememberPosition: Boolean = true,
     val videoKeepAwake: Boolean = true,
     val videoShowDuration: Boolean = true,
+    val timeline: Boolean = true,
+    /** Vault auto-lock in seconds: 0 immediately, 30, 60, 300, -1 never. Secure default = 60. */
+    val vaultAutoLockSec: Int = 60,
+    /** 0 balanced, 1 performance, 2 battery saver. */
+    val perfMode: Int = 0,
+    val newMediaBanner: Boolean = true,
+    /** Epoch ms; files added after this count as "new". 0 = not initialised yet. */
+    val newSince: Long = 0L,
+    val animations: Boolean = true,
 )
 
 object SettingsKeys {
@@ -49,6 +59,12 @@ object SettingsKeys {
     val VIDEO_REMEMBER_POS = booleanPreferencesKey("video_remember_pos")
     val VIDEO_KEEP_AWAKE = booleanPreferencesKey("video_keep_awake")
     val VIDEO_SHOW_DURATION = booleanPreferencesKey("video_show_duration")
+    val TIMELINE = booleanPreferencesKey("timeline")
+    val VAULT_AUTO_LOCK = intPreferencesKey("vault_auto_lock_sec")
+    val PERF_MODE = intPreferencesKey("perf_mode")
+    val NEW_BANNER = booleanPreferencesKey("new_media_banner")
+    val NEW_SINCE = longPreferencesKey("new_since")
+    val ANIMATIONS = booleanPreferencesKey("animations")
 }
 
 class SettingsRepository(private val context: Context) {
@@ -61,7 +77,8 @@ class SettingsRepository(private val context: Context) {
             slideshowSec = p[SettingsKeys.SLIDESHOW] ?: d.slideshowSec,
             appLock = p[SettingsKeys.APP_LOCK] ?: d.appLock,
             biometric = p[SettingsKeys.BIOMETRIC] ?: d.biometric,
-            autoLockSec = p[SettingsKeys.AUTO_LOCK] ?: d.autoLockSec,
+            // The old 15-minute option was dropped; map it to 5 minutes so the chip row still shows a selection.
+            autoLockSec = (p[SettingsKeys.AUTO_LOCK] ?: d.autoLockSec).let { if (it > 300) 300 else it },
             secureScreens = p[SettingsKeys.SECURE] ?: d.secureScreens,
             showNames = p[SettingsKeys.SHOW_NAMES] ?: d.showNames,
             mediaFilter = p[SettingsKeys.MEDIA_FILTER] ?: d.mediaFilter,
@@ -70,6 +87,12 @@ class SettingsRepository(private val context: Context) {
             videoRememberPosition = p[SettingsKeys.VIDEO_REMEMBER_POS] ?: d.videoRememberPosition,
             videoKeepAwake = p[SettingsKeys.VIDEO_KEEP_AWAKE] ?: d.videoKeepAwake,
             videoShowDuration = p[SettingsKeys.VIDEO_SHOW_DURATION] ?: d.videoShowDuration,
+            timeline = p[SettingsKeys.TIMELINE] ?: d.timeline,
+            vaultAutoLockSec = p[SettingsKeys.VAULT_AUTO_LOCK] ?: d.vaultAutoLockSec,
+            perfMode = p[SettingsKeys.PERF_MODE] ?: d.perfMode,
+            newMediaBanner = p[SettingsKeys.NEW_BANNER] ?: d.newMediaBanner,
+            newSince = p[SettingsKeys.NEW_SINCE] ?: d.newSince,
+            animations = p[SettingsKeys.ANIMATIONS] ?: d.animations,
         )
     }
 
