@@ -48,3 +48,14 @@ web localStorage JSON import, WorkManager jobs. Lint currently reports without f
 * Video thumbnails use Coil's `VideoFrameDecoder` (configured in `VaultApp`).
 * Not implemented yet: encryption of private media, background playback / MediaSession, video playback inside the
   slideshow, video trim/editor, duplicate detection, backup/restore, WorkManager indexing, Paging.
+
+## UX + smart features upgrade (DB v3)
+
+* Navigation: Home / Albums / Favorites / Vault (bottom bar on phones, rail on >= 600dp). Search, filters, sort, trash,
+  storage and settings live in each screen's top-bar menus / the filter sheet.
+* Smart Albums = MediaStore buckets grouped in Room. Timeline = date headers over the date-sorted grid.
+* Private Vault: items are copied into app-private storage, encrypted with chunked AES-256-GCM (per-file key sealed by the
+  Android Keystore), verified by hash, and only then does Android ask to delete the original (`createDeleteRequest`).
+  Vault video plays through an on-the-fly decrypting Media3 DataSource; nothing decrypted is written to disk.
+* Video tools (trim, remove audio, save frame) use MediaExtractor/MediaMuxer (no re-encode). Compression is NOT implemented.
+* Not implemented: Move to album, freeform crop, video compression, WorkManager indexing, Paging 3, two-pane layouts.
