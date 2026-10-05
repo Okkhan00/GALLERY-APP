@@ -98,4 +98,35 @@ data class WalletTransactionEntity(
 data class TagCount(val id: Long, val name: String, val photoCount: Int)
 
 data class MediaCounts(val total: Int, val photos: Int, val videos: Int)
+
+/** One smart album = one MediaStore bucket (folder). Built from real bucket names, nothing is hard-coded. */
+data class AlbumInfo(val bucket: String, val total: Int, val photos: Int, val videos: Int, val coverUri: String?)
 data class TypeBytes(val photoBytes: Long, val videoBytes: Long)
+
+/**
+ * A photo/video that was moved into the private vault. The bytes live ONLY in app-private storage, encrypted
+ * (see VaultCrypto); [wrappedKey] is the per-file data key sealed by the Android Keystore.
+ * Added in DB v3; no defaults on purpose so the SQL in MigrationSql matches Room's expected schema exactly.
+ */
+@Entity(tableName = "vault_items")
+data class VaultItemEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long,
+    val fileName: String,
+    val thumbName: String,
+    val wrappedKey: String,
+    val displayName: String,
+    val mimeType: String,
+    val mediaType: Int,
+    val size: Long,
+    val width: Int,
+    val height: Int,
+    val durationMs: Long,
+    val dateTaken: Long,
+    val hiddenAt: Long,
+    val favorite: Boolean,
+    val sha256: String,
+) {
+    @get:Ignore val isVideo: Boolean get() = mediaType == MediaType.VIDEO
+}
+
+data class VaultNames(val fileName: String, val thumbName: String)
