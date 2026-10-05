@@ -26,8 +26,20 @@ import com.vaultgallery.app.data.AppSettings
 import com.vaultgallery.app.data.SettingsRepository
 import com.vaultgallery.app.security.AppLockManager
 import com.vaultgallery.app.security.PinManager
+import com.vaultgallery.app.security.SecureFlag
+import com.vaultgallery.app.security.VaultSession
+import com.vaultgallery.app.ui.theme.LocalAnimations
+import androidx.compose.runtime.CompositionLocalProvider
+import android.net.Uri
+import com.vaultgallery.app.ui.components.VaultAuthHost
 import com.vaultgallery.app.ui.screens.EditorScreen
+import com.vaultgallery.app.ui.screens.GalleryScope
 import com.vaultgallery.app.ui.screens.GalleryScreen
+import com.vaultgallery.app.ui.screens.MainShell
+import com.vaultgallery.app.ui.screens.OTHER_ALBUM_ROUTE
+import com.vaultgallery.app.ui.screens.StorageScreen
+import com.vaultgallery.app.ui.screens.VaultViewerScreen
+import com.vaultgallery.app.ui.screens.VideoToolsScreen
 import com.vaultgallery.app.ui.screens.LockScreen
 import com.vaultgallery.app.ui.screens.PermissionGate
 import com.vaultgallery.app.ui.screens.SettingsScreen
@@ -42,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pin: PinManager
     private var latest: AppSettings? = null
     private var paused = false
+    private var vaultVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +62,8 @@ class MainActivity : AppCompatActivity() {
         settingsRepo = SettingsRepository(this)
         pin = PinManager(this)
         lifecycleScope.launch { settingsRepo.flow.collect { latest = it; updateSecureFlag() } }
+        // Vault screens always block screenshots and blank the recents thumbnail, whatever the global setting says.
+        lifecycleScope.launch { SecureFlag.active.collect { vaultVisible = it > 0; updateSecureFlag() } }
         setContent { Root() }
     }
 
@@ -60,7 +75,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) AppLockManager.onStop()
+        if (!isChangingConfigurations) { AppLockManager.onStop(); VaultSession.left() }
     }
 
     override fun onPause() { super.onPause(); paused = true; updateSecureFlag() }
@@ -69,7 +84,7 @@ class MainActivity : AppCompatActivity() {
     /** FLAG_SECURE blocks screenshots/recording and blanks the recent-apps thumbnail. */
     private fun updateSecureFlag() {
         val s = latest
-        val secure = s?.secureScreens == true || (paused && s?.appLock == true)
+        val secure = s?.secureScreens == true || vaultVisible || (paused && s?.appLock == true)
         if (secure) window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
@@ -87,7 +102,12 @@ class MainActivity : AppCompatActivity() {
                     LockScreen(pin, s.biometric, onUnlocked = { AppLockManager.unlock() })
                 } else {
                     val vm: GalleryViewModel = viewModel()
-                    PermissionGate(onGranted = { vm.scan() }) { AppNav(vm, s) }
+                    // Subtle motion is skipped when animations are off or when Performance / Battery saver is selected.
+                    CompositionLocalProvider(LocalAnimations provides (s.animations && s.perfMode == 0)) {
+                        VaultAuthHost(pin, s) {
+                            PermissionGate(onGranted = { vm.scan() }) { AppNav(vm, s) }
+                        }
+                    }
                 }
             }
         }
@@ -97,14 +117,34 @@ class MainActivity : AppCompatActivity() {
     private fun AppNav(vm: GalleryViewModel, settings: AppSettings) {
         val nav = rememberNavController()
         val pinManager = remember { pin }
-        NavHost(nav, startDestination = "gallery") {
-            composable("gallery") {
-                // Videos open the dedicated player; photos open the photo viewer. Both use the same list index.
-                val open: (Int) -> Unit = { i ->
-                    if (vm.photos.value?.getOrNull(i)?.isVideo == true) nav.navigate("video/$i") else nav.navigate("viewer/$i")
-                }
-                GalleryScreen(vm, settings, onOpen = open, onSettings = { nav.navigate("settings") }, onTrash = { nav.navigate("trash") })
+        NavHost(nav, startDestination = "main") {
+            composable("main") {
+                // Videos open the dedicated player; photos open the photo viewer. Both index into the same list.
+                MainShell(
+                    vm, settings,
+                    onOpenMedia = { i -> if (vm.photos.value?.getOrNull(i)?.isVideo == true) nav.navigate("video/$i") else nav.navigate("viewer/$i") },
+                    onOpenAlbum = { name -> nav.navigate("album/${Uri.encode(name.ifEmpty { OTHER_ALBUM_ROUTE })}") },
+                    onOpenVaultItem = { i -> nav.navigate("vaultviewer/$i") },
+                    onSettings = { nav.navigate("settings") }, onTrash = { nav.navigate("trash") }, onStorage = { nav.navigate("storage") },
+                )
             }
+            composable("album/{name}", arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+                val raw = it.arguments?.getString("name") ?: ""
+                val album = if (raw == OTHER_ALBUM_ROUTE) "" else raw
+                GalleryScreen(
+                    vm, settings, GalleryScope.Album(album),
+                    onOpen = { i -> if (vm.photos.value?.getOrNull(i)?.isVideo == true) nav.navigate("video/$i") else nav.navigate("viewer/$i") },
+                    onSettings = { nav.navigate("settings") }, onTrash = { nav.navigate("trash") }, onStorage = { nav.navigate("storage") },
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable("vaultviewer/{index}", arguments = listOf(navArgument("index") { type = NavType.IntType })) {
+                VaultViewerScreen(vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() })
+            }
+            composable("videotools/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
+                VideoToolsScreen(vm, it.arguments?.getLong("id") ?: -1L, onBack = { nav.popBackStack() })
+            }
+            composable("storage") { StorageScreen(vm, onBack = { nav.popBackStack() }) }
             composable("viewer/{index}", arguments = listOf(navArgument("index") { type = NavType.IntType })) {
                 ViewerScreen(
                     vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() },
@@ -112,12 +152,12 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             composable("video/{index}", arguments = listOf(navArgument("index") { type = NavType.IntType })) {
-                VideoPlayerScreen(vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() })
+                VideoPlayerScreen(vm, settings, it.arguments?.getInt("index") ?: 0, onBack = { nav.popBackStack() }, onTools = { id -> nav.navigate("videotools/$id") })
             }
             composable("editor/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                 EditorScreen(vm, it.arguments?.getLong("id") ?: -1L, onBack = { nav.popBackStack() })
             }
-            composable("settings") { SettingsScreen(vm, settings, pinManager, onBack = { nav.popBackStack() }) }
+            composable("settings") { SettingsScreen(vm, settings, pinManager, onBack = { nav.popBackStack() }, onStorage = { nav.navigate("storage") }, onTrash = { nav.navigate("trash") }) }
             composable("trash") { TrashScreen(vm, onBack = { nav.popBackStack() }) }
         }
     }
