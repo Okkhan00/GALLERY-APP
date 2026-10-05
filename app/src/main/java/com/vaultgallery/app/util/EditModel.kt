@@ -9,8 +9,32 @@ data class EditParams(
     val rotation: Int = 0,
     val flipH: Boolean = false,
     val flipV: Boolean = false,
+    // Added with the editor upgrade. Appended with defaults so every existing preset and call keeps working.
+    val warmth: Int = 0,        // -100 cool .. 100 warm
+    val highlights: Int = 0,    // -100 .. 100
+    val shadows: Int = 0,       // -100 .. 100
+    val sharpness: Int = 0,     // 0 .. 100
+    val vignette: Int = 0,      // 0 .. 100
+    val crop: Int = 0,          // index into EditCrop.OPTIONS (0 = original)
 ) {
-    fun encode() = "b=$brightness;c=$contrast;s=$saturate;sp=$sepia;bl=$blur;r=$rotation;fh=$flipH;fv=$flipV"
+    fun encode() = "b=$brightness;c=$contrast;s=$saturate;sp=$sepia;bl=$blur;r=$rotation;fh=$flipH;fv=$flipV;" +
+        "w=$warmth;hi=$highlights;sh=$shadows;sr=$sharpness;vg=$vignette;cr=$crop"
+}
+
+/** Center-crop presets. Pure maths so it is unit-tested. */
+object EditCrop {
+    val OPTIONS: List<Pair<String, Float>> = listOf(
+        "Original" to 0f, "1:1" to 1f, "4:3" to 4f / 3f, "3:4" to 3f / 4f, "16:9" to 16f / 9f, "9:16" to 9f / 16f,
+    )
+
+    /** Returns x, y, width, height of the centered crop with the given aspect ratio (w/h) inside w x h. */
+    fun rect(w: Int, h: Int, aspect: Float): IntArray {
+        if (aspect <= 0f || w <= 0 || h <= 0) return intArrayOf(0, 0, w, h)
+        val cw: Int
+        val ch: Int
+        if (w.toFloat() / h > aspect) { ch = h; cw = Math.round(h * aspect).coerceIn(1, w) } else { cw = w; ch = Math.round(w / aspect).coerceIn(1, h) }
+        return intArrayOf((w - cw) / 2, (h - ch) / 2, cw, ch)
+    }
 }
 
 /** Same presets as the web editor. */
@@ -36,6 +60,7 @@ object EditMath {
         m = concat(contrast(p.contrast / 100f), m)
         m = concat(saturation(p.saturate / 100f), m)
         m = concat(sepia(p.sepia / 100f), m)
+        m = concat(warmth(p.warmth / 100f), m)
         return m
     }
 
@@ -54,6 +79,17 @@ object EditMath {
             r * (1 - s), g * (1 - s), b * (1 - s) + s, 0f, 0f,
             0f, 0f, 0f, 1f, 0f,
         )
+    }
+
+    /** Warm = more red / less blue, cool = the opposite. */
+    private fun warmth(w: Float) = floatArrayOf(1f + 0.18f * w, 0f, 0f, 0f, 0f, 0f, 1f + 0.02f * w, 0f, 0f, 0f, 0f, 0f, 1f - 0.18f * w, 0f, 0f, 0f, 0f, 0f, 1f, 0f)
+
+    /** 256-entry brightness delta by luminance: shadows lift/darken the dark end, highlights the bright end. */
+    fun toneTable(shadows: Int, highlights: Int): IntArray = IntArray(256) { l ->
+        val x = l / 255f
+        val dark = (1f - x) * (1f - x)
+        val bright = x * x
+        Math.round(shadows / 100f * 60f * dark + highlights / 100f * 60f * bright)
     }
 
     private fun sepia(a: Float): FloatArray {
