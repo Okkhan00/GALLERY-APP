@@ -13,4 +13,13 @@ object MigrationSql {
         "CREATE UNIQUE INDEX IF NOT EXISTS index_photos_mediaStoreId_mediaType ON photos (mediaStoreId, mediaType)",
         "CREATE INDEX IF NOT EXISTS index_photos_mediaType ON photos (mediaType)",
     )
+
+    /** v2 -> v3 (private vault). Adds one new table; every existing table is untouched. */
+    val V2_TO_V3 = listOf(
+        "CREATE TABLE IF NOT EXISTS `vault_items` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+            "`fileName` TEXT NOT NULL, `thumbName` TEXT NOT NULL, `wrappedKey` TEXT NOT NULL, `displayName` TEXT NOT NULL, " +
+            "`mimeType` TEXT NOT NULL, `mediaType` INTEGER NOT NULL, `size` INTEGER NOT NULL, `width` INTEGER NOT NULL, " +
+            "`height` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `dateTaken` INTEGER NOT NULL, `hiddenAt` INTEGER NOT NULL, " +
+            "`favorite` INTEGER NOT NULL, `sha256` TEXT NOT NULL)",
+    )
 }
