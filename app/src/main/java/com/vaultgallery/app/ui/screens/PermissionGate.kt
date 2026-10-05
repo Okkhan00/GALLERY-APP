@@ -56,6 +56,15 @@ private fun hasAccess(ctx: Context): Boolean = when {
     else -> granted(ctx, Manifest.permission.READ_EXTERNAL_STORAGE)
 }
 
+/** All media permissions this app can use (photos + videos, plus the partial-access one on Android 14+). */
+fun allMediaPermissions(): Array<String> = requiredPermissions()
+
+fun hasPhotoAccess(ctx: Context): Boolean = when {
+    Build.VERSION.SDK_INT >= 34 -> granted(ctx, Manifest.permission.READ_MEDIA_IMAGES) || granted(ctx, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    Build.VERSION.SDK_INT >= 33 -> granted(ctx, Manifest.permission.READ_MEDIA_IMAGES)
+    else -> granted(ctx, Manifest.permission.READ_EXTERNAL_STORAGE)
+}
+
 fun hasVideoAccess(ctx: Context): Boolean = when {
     Build.VERSION.SDK_INT >= 34 -> granted(ctx, Manifest.permission.READ_MEDIA_VIDEO) || granted(ctx, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
     Build.VERSION.SDK_INT >= 33 -> granted(ctx, Manifest.permission.READ_MEDIA_VIDEO)
