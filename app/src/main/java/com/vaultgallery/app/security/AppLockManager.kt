@@ -20,6 +20,6 @@ object AppLockManager {
         val away = if (stoppedAt == 0L) 0 else SystemClock.elapsedRealtime() - stoppedAt
         stoppedAt = 0
         if (skipNextLock) { skipNextLock = false; return }
-        if (enabled && away >= timeoutSec * 1000L && away > 0) lock()
+        if (enabled && timeoutSec >= 0 && away >= timeoutSec * 1000L && away > 0) lock()
     }
 }
